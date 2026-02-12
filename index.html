@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Space Defender Final Mobile</title>
+    <style>
+        /* --- OPTIK & LAYOUT --- */
+        body {
+            margin: 0; padding: 0;
+            background-color: #0b0c10;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex; justify-content: center; align-items: center;
+            height: 100vh; overflow: hidden;
+            /* FIX 2: Verhindert System-Gesten wie 'Swipe to refresh' */
+            touch-action: none; 
+        }
+
+        #gameWrapper {
+            position: relative;
+            width: 100vw; height: 100vh;
+            max-width: 800px; max-height: 600px;
+            background: #000;
+        }
+
+        canvas {
+            display: block;
+            width: 100%; height: 100%;
+        }
+
+        /* Schichten (Overlays) */
+        .overlay {
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%;
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 100;
+            text-align: center;
+        }
+
+        #scoreboard {
+            position: absolute; top: 15px; left: 15px;
+            z-index: 50; pointer-events: none;
+            font-size: 16px;
+        }
+
+        button {
+            background: #4ecca3; border: none;
+            padding: 15px 30px; margin: 10px;
+            font-size: 18px; font-weight: bold;
+            border-radius: 10px; cursor: pointer;
+        }
+
+        /* Handy Steuerung */
+        #touchControls {
+            position: absolute; bottom: 30px; width: 100%;
+            display: flex; justify-content: space-between;
+            padding: 0 25px; box-sizing: border-box;
+            z-index: 80; pointer-events: none;
+        }
+
+        .t-btn {
+            width: 75px; height: 75px;
+            background: rgba(255, 255, 255, 0.15);
+            border: 3px solid #4ecca3; border-radius: 50%;
+            display: flex; justify-content: center; align-items: center;
+            font-size: 28px; color: white;
+            pointer-events: auto;
+            
+            /* FIX 3: Verhindert Markieren und Zoom-Reaktionen am Button */
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .fire-btn { border-color: #ff2e63; color: #ff2e63; font-size: 35px; }
+
+        #powerTimer { color: #ff2e63; font-weight: bold; display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="gameWrapper">
+        <div id="scoreboard">
+            <div style="color: #4ecca3;">SCORE: <span id="score">0</span></div>
+            <div style="color: #fce38a;">BEST: <span id="highscore">0</span></div>
+            <div id="powerTimer">TRIPLE: <span id="time">0</span>s</div>
+        </div>
+
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+        <div id="startMenu" class="overlay">
+            <h1 style="color: #4ecca3;">SPACE DEFENDER</h1>
+            <p>Schwierigkeitsgrad wählen:</p>
+            <button onpointerdown="initGame('easy')">Lol</button>
+            <button onpointerdown="initGame('medium')">MITTEL</button>
+            <button onpointerdown="initGame('hard')">SCHWER</button>
+        </div>
+
+        <div id="gameOver" class="overlay" style="display: none;">
+            <h1 style="color: #ff2e63;">DEFEATED</h1>
+            <p>Score: <span id="finalScore">0</span></p>
+            <button onpointerdown="location.reload()">NOCHMAL</button>
+        </div>
+
+        <div id="touchControls">
+            <div style="display: flex; gap: 20px; pointer-events: none;">
+                <div class="t-btn" id="btnLeft">◀</div>
+                <div class="t-btn" id="btnRight">▶</div>
+            </div>
+            <div class="t-btn fire-btn" id="btnFire">🔥</div>
+        </div>
+    </div>
+
+    <script>
+        // --- KONFIGURATION ---
+        const CONFIG = {
+            playerSpeed: 9,
+            bulletSpeed: 11,
+            powerupTime: 8,
+            difficulty: {
+                easy:   { spawn: 65, speed: 3.5, points: 10 },
+                medium: { spawn: 40, speed: 5.5, points: 25 },
+                hard:   { spawn: 22, speed: 8.5, points: 50 }
+            }
+        };
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Bilder
+        const imgPlayer = new Image(); imgPlayer.src = 'spieler.png';
+        const imgEnemy = new Image();  imgEnemy.src = 'gegner.png';
+        const imgBullet = new Image(); imgBullet.src = 'schuss.png';
+        const imgPower = new Image();  imgPower.src = 'powerup.png';
+
+        let gameRunning = false, score = 0, frames = 0, activeLvl = CONFIG.difficulty.medium;
+        let tripleActive = false, tripleTimer = 0;
+        const player = { x: 370, y: 500, w: 60, h: 60, dx: 0 };
+        let bullets = [], enemies = [], powerups = [];
+
+        document.getElementById('highscore').innerText = localStorage.getItem('spaceHigh') || 0;
+
+        // --- FIX 4: JavaScript Zoom-Sperre ---
+        document.addEventListener('touchstart', (e) => {
+            if (e.touches.length > 1) e.preventDefault();
+        }, { passive: false });
+
+        document.addEventListener('dblclick', (e) => e.preventDefault());
+
+        // --- STEUERUNG ---
+        window.addEventListener('keydown', e => {
+            if (e.key === 'ArrowLeft' || e.key === 'a') player.dx = -CONFIG.playerSpeed;
+            if (e.key === 'ArrowRight' || e.key === 'd') player.dx = CONFIG.playerSpeed;
+            if (e.key === ' ' || e.key === 'ArrowUp') shoot();
+        });
+        window.addEventListener('keyup', () => player.dx = 0);
+
+        const bind = (id, start, end) => {
+            const b = document.getElementById(id);
+            b.addEventListener('pointerdown', e => { e.preventDefault(); start(); });
+            b.addEventListener('pointerup', e => { e.preventDefault(); end(); });
+            b.addEventListener('pointerleave', e => { e.preventDefault(); end(); });
+        };
+
+        bind('btnLeft', () => player.dx = -CONFIG.playerSpeed, () => player.dx = 0);
+        bind('btnRight', () => player.dx = CONFIG.playerSpeed, () => player.dx = 0);
+        document.getElementById('btnFire').addEventListener('pointerdown', e => { e.preventDefault(); shoot(); });
+
+        function shoot() {
+            if (!gameRunning) return;
+            const shots = tripleActive ? [-3, 0, 3] : [0];
+            shots.forEach(a => bullets.push({ x: player.x + 25, y: player.y, w: 10, h: 22, angle: a }));
+        }
+
+        function update() {
+            if (!gameRunning) return;
+            player.x = Math.max(0, Math.min(canvas.width - player.w, player.x + player.dx));
+
+            if (tripleActive) {
+                tripleTimer -= 1/60;
+                document.getElementById('time').innerText = Math.ceil(tripleTimer);
+                if (tripleTimer <= 0) {
+                    tripleActive = false;
+                    document.getElementById('powerTimer').style.display = 'none';
+                }
+            }
+
+            bullets.forEach((b, i) => {
+                b.y -= CONFIG.bulletSpeed; b.x += b.angle;
+                if (b.y < -30) bullets.splice(i, 1);
+            });
+
+            if (frames % activeLvl.spawn === 0) enemies.push({ x: Math.random() * 750, y: -50, w: 50, h: 50, s: activeLvl.speed });
+            enemies.forEach((e, i) => {
+                e.y += e.s;
+                if (e.y > 600) enemies.splice(i, 1);
+                if (check(player, e)) endGame();
+                bullets.forEach((b, bi) => {
+                    if (check(b, e)) { enemies.splice(i, 1); bullets.splice(bi, 1); score += activeLvl.points; }
+                });
+            });
+
+            if (frames % 1000 === 0) powerups.push({ x: Math.random() * 750, y: -50, w: 40, h: 40 });
+            powerups.forEach((p, i) => {
+                p.y += 3;
+                if (check(player, p)) { tripleActive = true; tripleTimer = CONFIG.powerupTime; document.getElementById('powerTimer').style.display = 'block'; powerups.splice(i, 1); }
+            });
+
+            document.getElementById('score').innerText = score;
+            frames++;
+        }
+
+        function check(a, b) { return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const r = (img, o, c) => {
+                if (img.complete && img.naturalHeight !== 0) ctx.drawImage(img, o.x, o.y, o.w, o.h);
+                else { ctx.fillStyle = c; ctx.fillRect(o.x, o.y, o.w, o.h); }
+            };
+            r(imgPlayer, player, '#4ecca3');
+            bullets.forEach(b => r(imgBullet, b, '#ff2e63'));
+            enemies.forEach(e => r(imgEnemy, e, '#fce38a'));
+            powerups.forEach(p => r(imgPower, p, '#00ff00'));
+            if (gameRunning) requestAnimationFrame(() => { update(); draw(); });
+        }
+
+        function initGame(lvl) {
+            activeLvl = CONFIG.difficulty[lvl];
+            document.getElementById('startMenu').style.display = 'none';
+            gameRunning = true;
+            draw();
+        }
+
+        function endGame() {
+            gameRunning = false;
+            document.getElementById('gameOver').style.display = 'flex';
+            document.getElementById('finalScore').innerText = score;
+            const high = localStorage.getItem('spaceHigh') || 0;
+            if (score > high) localStorage.setItem('spaceHigh', score);
+        }
+    </script>
+</body>
+</html>
