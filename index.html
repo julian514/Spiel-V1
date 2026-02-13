@@ -11,8 +11,9 @@
             background-color: #0b0c10;
             font-family: Arial, sans-serif;
             overflow: hidden; 
-            touch-action: none; /* Wichtig für Handy-Steuerung */
+            touch-action: none; /* Verhindert Wischen und Zoomen auf Body-Ebene */
             user-select: none;
+            -webkit-user-select: none; /* Für iOS Safari */
         }
 
         #spielKasten {
@@ -22,9 +23,10 @@
             background: black;
             margin: auto;
             box-shadow: 0 0 20px rgba(226, 5, 5, 0.2);
+            touch-action: none;
         }
 
-        canvas { width: 100%; height: 100%; display: block; }
+        canvas { width: 100%; height: 100%; display: block; touch-action: none; }
 
         /* Texte und Menüs */
         .overlay {
@@ -47,6 +49,7 @@
             padding: 15px 40px; margin: 10px;
             font-size: 20px; font-weight: bold;
             border-radius: 8px; cursor: pointer;
+            touch-action: none; /* Wichtig für Menü-Buttons */
         }
 
         /* Handy Steuerung */
@@ -64,7 +67,7 @@
             display: flex; justify-content: center; align-items: center;
             font-size: 30px; color: white;
             pointer-events: auto; 
-            touch-action: manipulation;
+            touch-action: none; /* Geändert von manipulation auf none */
         }
 
         .feuer-knopf { border-color: #ff2e63; color: #ff2e63; }
@@ -105,6 +108,26 @@
 </div>
 
 <script>
+    // ==========================================
+    // ANTI-ZOOM & HANDY-FIXES
+    // ==========================================
+    
+    // Verhindert den Zoom durch einen regulären Doppelklick (Maus/Touch)
+    document.addEventListener('dblclick', function(event) {
+        event.preventDefault();
+    }, { passive: false });
+
+    // Verhindert den Zoom durch schnelles doppeltes Antippen (speziell für iOS)
+    let letzterTouch = 0;
+    document.addEventListener('touchend', function(event) {
+        let jetzt = (new Date()).getTime();
+        // Wenn zwischen zwei Tipps weniger als 300 Millisekunden liegen -> Blockieren!
+        if (jetzt - letzterTouch <= 300) {
+            event.preventDefault();
+        }
+        letzterTouch = jetzt;
+    }, { passive: false });
+
     // ==========================================
     // 1. DAS COCKPIT - HIER ALLES EINSTELLEN!
     // ==========================================
